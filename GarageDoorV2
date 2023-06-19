@@ -7,81 +7,149 @@ and yells at you when you leave the garage door open too long. I hope it serves 
 
 Tyler Winegarner, 2017
 
-/* Comment this out to disable prints and save space */
-#define BLYNK_PRINT Serial
-
+#include <Blynk.h>
 #include <ESP8266WiFi.h>
 #include <BlynkSimpleEsp8266.h>
+#include <EEPROM.h> // Include EEPROM library
 
-// You should get Auth Token in the Blynk App.
-// Go to the Project Settings (nut icon).
+#define BLYNK_PRINT Serial
+
 char auth[] = "AUTH CODE GOES HERE";
-
-// Your WiFi credentials.
-// Set password to "" for open networks.
 char ssid[] = "WIFI";
 char pass[] = "PASSWORD";
 
-// Select your pin with physical button
-const int doorPin = 2;
-int warnPin;
-int warnThreshold = 2000;
-int tick = 0;
-WidgetLCD lcd(V3);
-
-
-
+const int door1Pin = 2;
+const int door2Pin = 3;
+int warnPin1;
+int warnPin2;
+int warnThreshold1 = 2000;
+int warnThreshold2 = 2000;
+int tick1 = 0;
+int tick2 = 0;
+WidgetLCD lcd1(V1);
+WidgetLCD lcd2(V4);
 BlynkTimer timer;
 
-BLYNK_WRITE(V1) {
-  warnPin = param.asInt();
+BLYNK_WRITE(V2) {
+  warnPin1 = param.asInt();
 }
 
+BLYNK_WRITE(V5) {
+  warnPin2 = param.asInt();
+}
 
-// V3 LED Widget represents the physical button state
-boolean btnState = false;
-void buttonLedWidget()
+void buttonLedWidgetDoor1()
 {
-  // Read button
-  
-  // If state has changed...
-  if (digitalRead(doorPin) == HIGH) {
-   lcd.print(0,0, "Door Open  ");
-   tick++;
-  }  else {
-   lcd.print(0,0, "Door Closed");
-    
-   tick = 0;
-   Blynk.virtualWrite(warnPin, LOW);
+  if (digitalRead(door1Pin) == HIGH) {
+    lcd1.print(0, 0, "Door 1 Open  ");
+    tick1++;
   }
-  if (tick > warnThreshold) {
-    if (warnPin == LOW) {
-      Blynk.notify("Garage door is open!");
-      tick = (tick - 500);
+  else {
+    lcd1.print(0, 0, "Door 1 Closed");
+    tick1 = 0;
+    Blynk.virtualWrite(warnPin1, LOW);
+  }
+  
+  if (tick1 > warnThreshold1) {
+    if (warnPin1 == LOW) {
+      Blynk.notify("Garage door 1 is open!");
+      tick1 -= 500;
     }
   }
-  Blynk.virtualWrite(V2, tick);
+  
+  Blynk.virtualWrite(V3, tick1);
+}
+
+void buttonLedWidgetDoor2()
+{
+  if (digitalRead(door2Pin) == HIGH) {
+    lcd2.print(0, 0, "Door 2 Open  ");
+    tick2++;
+  }
+  else {
+    lcd2.print(0, 0, "Door 2 Closed");
+    tick2 = 0;
+    Blynk.virtualWrite(warnPin2, LOW);
+  }
+  
+  if (tick2 > warnThreshold2) {
+    if (warnPin2 == LOW) {
+      Blynk.notify("Garage door 2 is open!");
+      tick2 -= 500;
+    }
+  }
+  
+  Blynk.virtualWrite(V6, tick2);
+}
+
+void setupWiFi()
+{
+  EEPROM.begin(512); // Initialize EEPROM
+  WiFi.begin(ssid, pass);
+  Serial.print("Connecting to Wi-Fi");
+  
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  
+  Serial.println();
+  Serial.println("Wi-Fi connected");
+  Serial.println(WiFi.localIP());
+}
+
+void setupBlynk()
+{
+  Blynk.config(auth);
+  Blynk.connect();
+  
+  while (!Blynk.connected()) {
+    delay(500);
+    Serial.print(".");
+  }
+  
+  Serial.println();
+  Serial.println("Blynk connected");
+}
+
+void setupPins()
+{
+  pinMode(door1Pin, INPUT);
+  pinMode(door2Pin, INPUT);
 }
 
 void setup()
 {
-  // Debug console
   Serial.begin(9600);
-
-  Blynk.begin(auth, ssid, pass);
-  // You can also specify server:
-  //Blynk.begin(auth, ssid, pass, "blynk-cloud.com", 8442);
-  //Blynk.begin(auth, ssid, pass, IPAddress(192,168,1,100), 8442);
-
-  // Setup physical button pin (active low)
-  pinMode(doorPin, INPUT);
-
-  timer.setInterval(10, buttonLedWidget);
+  
+  setupWiFi();
+  setupBlynk();
+  setupPins();
+  
+  timer.setInterval(10, buttonLedWidgetDoor1);
+  timer.setInterval(10, buttonLedWidgetDoor2);
 }
 
 void loop()
 {
+  if (!Blynk.connected()) {
+    if (Blynk.connect()) {
+      Serial.println("Blynk reconnected");
+    }
+    else {
+      Serial.println("Blynk reconnect failed");
+    }
+  }
+  
   Blynk.run();
   timer.run();
   
+  // Enter low-power sleep state when idle
+  if (!Blynk.connected() && tick1 == 0 && tick2 == 0) {
+    Serial.println("Entering sleep state");
+    WiFi.disconnect(true);
+    WiFi.forceSleepBegin();
+    delay(100);
+    ESP.deepSleep(0);
+  }
 }
